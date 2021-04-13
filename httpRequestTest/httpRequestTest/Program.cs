@@ -1,11 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
+using Newtonsoft.Json;
 using System.IO;
-using System.Linq;
 using System.Net;
-using System.Text;
-using System.Threading.Tasks;
+using System.Diagnostics;
+using System.Windows.Forms;
 
 namespace httpRequestTest
 {
@@ -13,29 +12,92 @@ namespace httpRequestTest
     {
         static void Main(string[] args)
         {
-            HttpUploadFile("http://3.35.205.168:5022/api/analyze", @"fundus.jpg", @"D:\TTT\fundus.jpg");
+            var res = downloadLicenseInfo("http://127.0.0.1:5022/api/license", "result.json");
         }
 
-        public static void HttpUploadFile(string url, string fileName, string filePath)
+        public static bool registerLicense(String serverUrl, String licenseKey)
         {
-            string boundary = "--######################--";
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(serverUrl);
+            request.ContentType = "application/json";
+            request.Method = "POST";
+            request.KeepAlive = true;
+            request.UserAgent = ".NET Framework Client";
+            request.Credentials = System.Net.CredentialCache.DefaultCredentials;
+
+            Stream rs = request.GetRequestStream();
+
+            String formitem = "{\"license\": \"" + licenseKey + "\"}";
+            byte[] formitembytes = System.Text.Encoding.UTF8.GetBytes(formitem);
+            rs.Write(formitembytes, 0, formitembytes.Length);
+
+            String strResponse = "";
+            if (!getResponse(ref strResponse, request))
+                return false;
+
+            return true;
+        }
+
+        public static bool downloadLicenseInfo(String serverUrl, String resultFilePath)
+        {
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(serverUrl);
+            request.Method = "GET";
+            request.KeepAlive = true;
+            request.UserAgent = ".NET Framework Client";
+            request.Credentials = System.Net.CredentialCache.DefaultCredentials;
+
+            String strResponse = "";
+            if (!getResponse(ref strResponse, request))
+            {
+                if (strResponse.Length <= 0)
+                {
+                    return false;
+                }
+            }
+
+            File.WriteAllText(resultFilePath, strResponse);
+
+            return true;
+        }
+
+        public static String getUniqueKey(String serverUrl)
+        {
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(serverUrl);
+            request.Method = "GET";
+            request.KeepAlive = true;
+            request.UserAgent = ".NET Framework Client";
+            request.Credentials = System.Net.CredentialCache.DefaultCredentials;
+
+            String strResponse = "";
+            if (!getResponse(ref strResponse, request))
+                return null;
+
+            dynamic array = JsonConvert.DeserializeObject(strResponse);
+            if (array == null)
+                return null;
+
+            return array["unique_key"];
+        }
+
+        public static bool requestAnalysis(String serverUrl, String fileName, String filePath, String resultFilePath)
+        {
+            string boundary = "--" + Guid.NewGuid().ToString("N") + "--";
             byte[] boundarybytes = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "\r\n");
 
-            HttpWebRequest wr = (HttpWebRequest)WebRequest.Create(url);
-            wr.ContentType = "multipart/form-data; boundary=" + boundary;
-            wr.Method = "POST";
-            wr.KeepAlive = true;
-            wr.UserAgent = ".NET Framework Test Client";
-            //wr.Credentials = System.Net.CredentialCache.DefaultCredentials;
+            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(serverUrl);
+            request.ContentType = "multipart/form-data; boundary=" + boundary;
+            request.Method = "POST";
+            request.KeepAlive = true;
+            request.UserAgent = ".NET Framework Client";
+            request.Credentials = System.Net.CredentialCache.DefaultCredentials;
 
-            Stream rs = wr.GetRequestStream();
+            Stream rs = request.GetRequestStream();
 
             string formdataTemplate = "Content-Disposition: form-data; name=\"{0}\"\r\n\r\n{1}";
 
             // filename
             {
                 rs.Write(boundarybytes, 0, boundarybytes.Length);
-                string formitem = string.Format(formdataTemplate, "file_name", "fundus.jpg");
+                string formitem = string.Format(formdataTemplate, "file_name", fileName);
                 byte[] formitembytes = System.Text.Encoding.UTF8.GetBytes(formitem);
                 rs.Write(formitembytes, 0, formitembytes.Length);
             }
@@ -103,28 +165,52 @@ namespace httpRequestTest
                 fileStream.Close();
             }
 
-            byte[] trailer = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
-            rs.Write(trailer, 0, trailer.Length);
-            rs.Close();
+            //
+            {
+                byte[] trailer = System.Text.Encoding.ASCII.GetBytes("\r\n--" + boundary + "--\r\n");
+                rs.Write(trailer, 0, trailer.Length);
+                rs.Close();
+            }
 
-            WebResponse wresp = null;
+            // request
+            String strResponse = "";
+            if (!getResponse(ref strResponse, request))
+                return false;
+
+            File.WriteAllText(resultFilePath, strResponse);
+
+            return true;
+        }
+
+        static bool getResponse(ref String out_strResp, HttpWebRequest request)
+        {
+            WebResponse resp = null;
             try
             {
-                wresp = wr.GetResponse();
-                Stream stream2 = wresp.GetResponseStream();
-                StreamReader reader2 = new StreamReader(stream2);
+                resp = request.GetResponse();
+                StreamReader reader = new StreamReader(resp.GetResponseStream());
+                out_strResp = reader.ReadToEnd();
+
+                resp.Close();
+                resp = null;
+
+                return true;
             }
-            catch (Exception ex)
+            catch (WebException we)
             {
-                if (wresp != null)
+                HttpWebResponse resp_err = we.Response as HttpWebResponse;
+                if (resp_err != null && resp_err.StatusCode == HttpStatusCode.Unauthorized)
                 {
-                    wresp.Close();
-                    wresp = null;
+                    out_strResp = @"{ 'err': 401 }";
                 }
-            }
-            finally
-            {
-                wr = null;
+
+                if (resp != null)
+                {
+                    resp.Close();
+                    resp = null;
+                }
+
+                return false;
             }
         }
     }

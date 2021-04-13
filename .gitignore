@@ -32,3 +32,8 @@
 *.app
 /httpRequestTest/httpRequestTest/bin
 /httpRequestTest/httpRequestTest/obj
+/httpRequestTest/packages
+/httpRequestTest/httpRequestTest.VC.db
+/httpRequestTest/build
+/httpRequestTest/Debug
+/httpRequestTest/ipch
